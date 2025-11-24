@@ -1,0 +1,10 @@
+{
+  "id": "obsidian-vault-sync",
+  "name": "Vault Sync",
+  "version": "1.0.0",
+  "minAppVersion": "0.15.0",
+  "description": "Sync your vault with GitHub or a local server. Works on desktop and mobile.",
+  "author": "Lavish Mantri",
+  "authorUrl": "https://github.com/lavishmantri",
+  "isDesktopOnly": false
+}

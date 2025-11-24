@@ -1,0 +1,160 @@
+# Syncthing Ignore Patterns for Obsidian Vault
+#
+# This file tells Syncthing which files/folders to exclude from sync.
+# Place this file as `.stignore` in the root of your Obsidian vault.
+#
+# Documentation: https://docs.syncthing.net/users/ignoring.html
+#
+# Syntax:
+# - Patterns are case-sensitive
+# - `*` matches any character except `/`
+# - `**` matches any character including `/`
+# - `!` prefix negates the pattern (includes instead of excludes)
+# - Lines starting with `#` are comments
+# - Lines starting with `//` are also comments
+
+# ============================================================================
+# Device-Specific Obsidian Settings
+# ============================================================================
+# These files store device-specific state and should NOT be synced
+# between devices to avoid conflicts and preserve per-device preferences.
+
+# Workspace layouts (different on desktop vs mobile)
+.obsidian/workspace.json
+.obsidian/workspace-mobile.json
+.obsidian/workspace.json.bak
+
+# App-specific settings (themes, font sizes, etc.)
+.obsidian/app.json
+.obsidian/appearance.json
+
+# Graph view settings (different perspectives per device)
+.obsidian/graph.json
+
+# Starred items (may differ per device)
+# Uncomment if you want device-specific starred items
+# .obsidian/starred.json
+
+# ============================================================================
+# Cache and Temporary Files
+# ============================================================================
+# These are generated files that don't need to be synced
+
+# Obsidian cache directory
+.obsidian/cache/
+
+# Obsidian trash (already deleted files)
+.trash/
+
+# Plugin cache (if any)
+.obsidian/plugins/*/cache/
+
+# ============================================================================
+# System Files
+# ============================================================================
+# Operating system generated files that should never be synced
+
+# macOS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Linux
+.directory
+*~
+
+# ============================================================================
+# Sync Conflict Files
+# ============================================================================
+# Uncomment to hide conflict files from both devices
+# (You can still access them via Syncthing web UI)
+
+# *.sync-conflict-*
+
+# ============================================================================
+# Version Control (if using Git separately)
+# ============================================================================
+# Uncomment if you're also using Git for version control
+# (Syncthing and Git can coexist, but Git files don't need to sync)
+
+# .git/
+# .gitignore
+# .gitattributes
+
+# ============================================================================
+# Development Files (if vault contains code)
+# ============================================================================
+# Uncomment if your vault includes code files with build artifacts
+
+# node_modules/
+# .env
+# .env.local
+# dist/
+# build/
+# *.log
+
+# ============================================================================
+# Large Media Files (Optional)
+# ============================================================================
+# Uncomment to exclude large files and save space on mobile
+# Use Synctrain's "Selective Sync" feature instead for more control
+
+# Exclude all videos
+# *.mp4
+# *.mov
+# *.avi
+
+# Exclude large images
+# *.psd
+# *.ai
+
+# Exclude audio files
+# *.mp3
+# *.wav
+
+# ============================================================================
+# Plugin-Specific Exclusions (Advanced)
+# ============================================================================
+# Some plugins store large cache or temporary data
+
+# Dataview plugin cache
+.obsidian/plugins/dataview/
+
+# Templater plugin cache
+.obsidian/plugins/templater-obsidian/
+
+# ============================================================================
+# Custom Exclusions
+# ============================================================================
+# Add your custom patterns below
+
+# Example: Exclude a specific folder
+# Private/
+
+# Example: Exclude all files matching a pattern
+# *.draft.md
+
+# Example: Exclude temporary notes
+# temp-*.md
+
+# ============================================================================
+# Important Notes
+# ============================================================================
+#
+# 1. After modifying this file, Syncthing will rescan the folder
+# 2. Changes take effect immediately
+# 3. Test patterns in Syncthing web UI: Settings → Ignore Patterns
+# 4. View what's being ignored: Syncthing web UI → Folder → Global State
+# 5. Patterns are applied on the sending side, not receiving side
+#
+# ============================================================================
