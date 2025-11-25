@@ -1,0 +1,10 @@
+{
+  "id": "obsidian-vault-sync-v2",
+  "name": "Vault Sync v2",
+  "version": "2.0.0",
+  "minAppVersion": "0.15.0",
+  "description": "Sync your vault with a custom server via manual push/pull operations",
+  "author": "Lavish Mantri",
+  "authorUrl": "https://github.com/lavishmantri",
+  "isDesktopOnly": false
+}
