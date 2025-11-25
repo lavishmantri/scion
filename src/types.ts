@@ -1,8 +1,8 @@
 /**
- * Type definitions for Vault Sync v2 plugin
+ * Type definitions for Scion plugin
  */
 
-export interface VaultSyncV2Settings {
+export interface ScionSettings {
   // Server configuration
   serverUrl: string;        // e.g., http://localhost:3000
   apiKey: string;           // API key for server authentication
@@ -15,7 +15,7 @@ export interface VaultSyncV2Settings {
   showNotifications: boolean;
 }
 
-export const DEFAULT_V2_SETTINGS: VaultSyncV2Settings = {
+export const DEFAULT_SETTINGS: ScionSettings = {
   serverUrl: 'http://localhost:3000',
   apiKey: '',
   nosyncPath: '.nosync',

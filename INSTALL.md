@@ -1,4 +1,4 @@
-# Vault Sync v2 - Installation Guide
+# Scion - Installation Guide
 
 ## Prerequisites
 
@@ -32,20 +32,20 @@ Server runs on `http://localhost:3000`
 1. **Via Symlink (Recommended for Development)**
 ```bash
 # Replace paths with your actual paths
-ln -s ~/Projects/scion/v2 ~/.obsidian/plugins/obsidian-vault-sync-v2
+ln -s ~/Projects/scion ~/.obsidian/plugins/scion
 # Restart Obsidian
 ```
 
 2. **Or Copy Folder**
 ```bash
-cp -r v2 ~/.obsidian/plugins/obsidian-vault-sync-v2
+cp -r . ~/.obsidian/plugins/scion
 # Restart Obsidian
 ```
 
 ### Step 3: Configure
 
-1. Obsidian Settings → Community Plugins → Enable "Vault Sync v2"
-2. Settings → Vault Sync v2
+1. Obsidian Settings → Community Plugins → Enable "Scion"
+2. Settings → Scion
 3. Enter:
    - Server URL: `http://localhost:3000`
    - API Key: (the key from step 1)
@@ -94,7 +94,7 @@ npm start
 ### Step 6: Use from Phone
 
 1. Install Obsidian on iOS
-2. Install Vault Sync v2 plugin
+2. Install Scion plugin
 3. Configure with Tailscale IP
 4. Use push/pull commands
 
@@ -153,7 +153,6 @@ sudo apt-get install -y nginx certbot python3-certbot-nginx
 ### Build the Plugin
 
 ```bash
-cd v2
 npm install
 
 # Watch mode (auto rebuild on changes)
@@ -171,11 +170,10 @@ cd vault-sync-server
 npm start
 
 # Terminal 2: Watch plugin build
-cd v2
 npm run dev
 
 # Terminal 3: Symlink to your vault
-ln -s ~/Projects/scion/v2 ~/.obsidian/plugins/obsidian-vault-sync-v2
+ln -s ~/Projects/scion ~/.obsidian/plugins/scion
 # Restart Obsidian
 ```
 
@@ -206,9 +204,9 @@ curl -X DELETE \
 
 ### Plugin doesn't appear in settings
 
-1. Check symlink or copy worked: `ls ~/.obsidian/plugins/obsidian-vault-sync-v2/`
+1. Check symlink or copy worked: `ls ~/.obsidian/plugins/scion/`
 2. Restart Obsidian completely (quit and reopen)
-3. Check for build errors: `npm run build` in v2 folder
+3. Check for build errors: `npm run build`
 4. Check Obsidian console (Cmd+Option+I) for errors
 
 ### "Cannot reach server" error
@@ -236,8 +234,8 @@ curl -X DELETE \
 
 ### Remove Plugin
 
-1. Settings → Community Plugins → Vault Sync v2 → Uninstall
-2. Or delete folder: `rm -rf ~/.obsidian/plugins/obsidian-vault-sync-v2/`
+1. Settings → Community Plugins → Scion → Uninstall
+2. Or delete folder: `rm -rf ~/.obsidian/plugins/scion/`
 
 ### Stop Server
 

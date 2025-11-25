@@ -1,5 +1,5 @@
 /**
- * REST API client for Vault Sync Server
+ * REST API client for Scion Server
  */
 
 import { requestUrl, arrayBufferToString, stringToArrayBuffer } from 'obsidian';

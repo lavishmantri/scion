@@ -63,7 +63,7 @@
   var import_obsidian6 = __toModule(__require("obsidian"));
 
   // src/types.ts
-  var DEFAULT_V2_SETTINGS = {
+  var DEFAULT_SETTINGS = {
     serverUrl: "http://localhost:3000",
     apiKey: "",
     nosyncPath: ".nosync",
@@ -80,7 +80,7 @@
 
   // src/settings.ts
   var import_obsidian = __toModule(__require("obsidian"));
-  var VaultSyncV2SettingTab = class extends import_obsidian.PluginSettingTab {
+  var ScionSettingTab = class extends import_obsidian.PluginSettingTab {
     constructor(app, plugin) {
       super(app, plugin);
       this.plugin = plugin;
@@ -88,7 +88,7 @@
     display() {
       const { containerEl } = this;
       containerEl.empty();
-      containerEl.createEl("h2", { text: "Vault Sync v2 Settings" });
+      containerEl.createEl("h2", { text: "Scion Settings" });
       containerEl.createEl("h3", { text: "Server Configuration" });
       new import_obsidian.Setting(containerEl).setName("Server URL").setDesc("URL of your Vault Sync server (e.g., http://localhost:3000 or http://192.168.1.100:3000)").addText((text) => text.setPlaceholder("http://localhost:3000").setValue(this.plugin.settings.serverUrl).onChange((value) => __async(this, null, function* () {
         this.plugin.settings.serverUrl = value.trim();
@@ -674,7 +674,7 @@ Please resolve manually and retry.`);
   };
 
   // src/main.ts
-  var VaultSyncV2Plugin = class extends import_obsidian6.Plugin {
+  var ScionPlugin = class extends import_obsidian6.Plugin {
     constructor() {
       super(...arguments);
       this.syncStatus = SyncStatus.Idle;
@@ -722,12 +722,12 @@ Please resolve manually and retry.`);
             yield this.showDiff();
           })
         });
-        this.addSettingTab(new VaultSyncV2SettingTab(this.app, this));
-        this.log("Vault Sync v2 plugin loaded");
+        this.addSettingTab(new ScionSettingTab(this.app, this));
+        this.log("Scion plugin loaded");
       });
     }
     onunload() {
-      this.log("Vault Sync v2 plugin unloaded");
+      this.log("Scion plugin unloaded");
     }
     performPush() {
       return __async(this, null, function* () {
@@ -855,12 +855,12 @@ Conflicts: ${diff.conflicts.length}`;
         [SyncStatus.Pulling]: "\u27F3 Pulling...",
         [SyncStatus.Error]: "\u2717 Error"
       };
-      this.statusBarItem.setText(`Vault Sync: ${statusText[this.syncStatus]}`);
+      this.statusBarItem.setText(`Scion: ${statusText[this.syncStatus]}`);
     }
     loadSettings() {
       return __async(this, null, function* () {
         const data = yield this.loadData();
-        this.settings = Object.assign({}, DEFAULT_V2_SETTINGS, data);
+        this.settings = Object.assign({}, DEFAULT_SETTINGS, data);
       });
     }
     saveSettings() {
@@ -873,7 +873,7 @@ Conflicts: ${diff.conflicts.length}`;
     }
     log(message) {
       if (this.settings.enableLogging) {
-        console.log(`[Vault Sync v2] ${message}`);
+        console.log(`[Scion] ${message}`);
       }
     }
   };

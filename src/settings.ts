@@ -1,15 +1,15 @@
 /**
- * Settings UI for Vault Sync v2 plugin
+ * Settings UI for Scion plugin
  */
 
 import { App, PluginSettingTab, Setting } from 'obsidian';
-import { VaultSyncV2Settings } from './types';
-import VaultSyncV2Plugin from './main';
+import { ScionSettings } from './types';
+import ScionPlugin from './main';
 
-export class VaultSyncV2SettingTab extends PluginSettingTab {
-  plugin: VaultSyncV2Plugin;
+export class ScionSettingTab extends PluginSettingTab {
+  plugin: ScionPlugin;
 
-  constructor(app: App, plugin: VaultSyncV2Plugin) {
+  constructor(app: App, plugin: ScionPlugin) {
     super(app, plugin);
     this.plugin = plugin;
   }
@@ -18,7 +18,7 @@ export class VaultSyncV2SettingTab extends PluginSettingTab {
     const { containerEl } = this;
     containerEl.empty();
 
-    containerEl.createEl('h2', { text: 'Vault Sync v2 Settings' });
+    containerEl.createEl('h2', { text: 'Scion Settings' });
 
     // Server configuration section
     containerEl.createEl('h3', { text: 'Server Configuration' });

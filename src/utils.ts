@@ -1,5 +1,5 @@
 /**
- * Utility functions for Vault Sync v2 plugin
+ * Utility functions for Scion plugin
  */
 
 import { arrayBufferToString, stringToArrayBuffer } from 'obsidian';

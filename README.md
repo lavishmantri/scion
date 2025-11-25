@@ -1,4 +1,4 @@
-# Vault Sync v2
+# Scion
 
 Manual push/pull synchronization for Obsidian vaults using a custom HTTP server.
 
@@ -29,22 +29,22 @@ Server runs on `http://localhost:3000` by default.
 
 ### 2. Install Plugin
 
-1. Copy `v2` folder to your vault's `.obsidian/plugins/` directory:
+1. Copy to your vault's `.obsidian/plugins/` directory:
 ```bash
-cp -r v2 /path/to/vault/.obsidian/plugins/obsidian-vault-sync-v2
+cp -r . /path/to/vault/.obsidian/plugins/scion
 ```
 
 2. Or create a symlink for development:
 ```bash
-ln -s /path/to/scion/v2 /path/to/vault/.obsidian/plugins/obsidian-vault-sync-v2
+ln -s /path/to/scion /path/to/vault/.obsidian/plugins/scion
 ```
 
 3. Restart Obsidian
-4. Enable "Vault Sync v2" in Settings → Community Plugins
+4. Enable "Scion" in Settings → Community Plugins
 
 ### 3. Configure Plugin
 
-1. Open Settings → Vault Sync v2
+1. Open Settings → Scion
 2. Enter Server URL: `http://localhost:3000`
 3. Enter API Key (from .env file)
 4. Click "Test Connection"
@@ -144,7 +144,7 @@ See vault-sync-server README for full deployment guide.
 ### "Invalid API key"
 - Check API key in settings matches .env file
 - Verify there are no extra spaces
-- Settings → Vault Sync v2 → re-enter API key
+- Settings → Scion → re-enter API key
 
 ### "Conflicts detected"
 - Manual conflicts must be resolved manually
@@ -216,7 +216,7 @@ npm run dev  # Ctrl+C to stop
 ## File Structure
 
 ```
-v2/
+scion/
 ├── manifest.json           # Plugin metadata
 ├── package.json            # Dependencies
 ├── tsconfig.json           # TypeScript config

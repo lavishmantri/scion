@@ -1,19 +1,19 @@
 /**
- * Vault Sync v2 - Obsidian Plugin
+ * Scion - Obsidian Plugin
  * Manual push/pull sync with custom HTTP server
  */
 
 import { Notice, Plugin } from 'obsidian';
-import { VaultSyncV2Settings, DEFAULT_V2_SETTINGS, SyncStatus } from './types';
-import { VaultSyncV2SettingTab } from './settings';
+import { ScionSettings, DEFAULT_SETTINGS, SyncStatus } from './types';
+import { ScionSettingTab } from './settings';
 import { ServerAPI } from './server-api';
 import { VaultUtils } from './vault-utils';
 import { SyncEngine } from './sync-engine';
 import { IgnorePatterns } from './ignore-patterns';
 import { formatBytes, formatTime } from './utils';
 
-export default class VaultSyncV2Plugin extends Plugin {
-  settings: VaultSyncV2Settings;
+export default class ScionPlugin extends Plugin {
+  settings: ScionSettings;
   statusBarItem: HTMLElement;
   syncStatus: SyncStatus = SyncStatus.Idle;
 
@@ -80,13 +80,13 @@ export default class VaultSyncV2Plugin extends Plugin {
     });
 
     // Add settings tab
-    this.addSettingTab(new VaultSyncV2SettingTab(this.app, this));
+    this.addSettingTab(new ScionSettingTab(this.app, this));
 
-    this.log('Vault Sync v2 plugin loaded');
+    this.log('Scion plugin loaded');
   }
 
   onunload() {
-    this.log('Vault Sync v2 plugin unloaded');
+    this.log('Scion plugin unloaded');
   }
 
   /**
@@ -254,7 +254,7 @@ export default class VaultSyncV2Plugin extends Plugin {
       [SyncStatus.Error]: '✗ Error'
     };
 
-    this.statusBarItem.setText(`Vault Sync: ${statusText[this.syncStatus]}`);
+    this.statusBarItem.setText(`Scion: ${statusText[this.syncStatus]}`);
   }
 
   /**
@@ -262,7 +262,7 @@ export default class VaultSyncV2Plugin extends Plugin {
    */
   private async loadSettings() {
     const data = await this.loadData();
-    this.settings = Object.assign({}, DEFAULT_V2_SETTINGS, data);
+    this.settings = Object.assign({}, DEFAULT_SETTINGS, data);
   }
 
   /**
@@ -282,7 +282,7 @@ export default class VaultSyncV2Plugin extends Plugin {
    */
   log(message: string) {
     if (this.settings.enableLogging) {
-      console.log(`[Vault Sync v2] ${message}`);
+      console.log(`[Scion] ${message}`);
     }
   }
 }
