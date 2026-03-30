@@ -4,6 +4,7 @@
  */
 
 import { execFileSync } from 'child_process';
+import fs from 'fs';
 import path from 'path';
 import fse from 'fs-extra';
 import { getVaultPath, computeHash, validateFilePath } from './db.js';
@@ -25,6 +26,13 @@ export interface PushOperationResult {
   file_id?: string;
   hash?: string;
   error?: string;
+}
+
+function writeFileWithSync(filePath: string, content: Buffer): void {
+  fs.writeFileSync(filePath, content);
+  const fd = fs.openSync(filePath, 'r');
+  fs.fsyncSync(fd);
+  fs.closeSync(fd);
 }
 
 function gitAdd(vaultPath: string, filePath: string): void {
@@ -58,7 +66,7 @@ export function processPushCreate(
   const hash = computeHash(content);
 
   fse.ensureDirSync(path.dirname(fullPath));
-  fse.writeFileSync(fullPath, content);
+  writeFileWithSync(fullPath, content);
   gitAdd(vaultPath, op.path);
 
   return { index, success: true, hash };
@@ -86,7 +94,7 @@ export function processPushModify(
   const content = Buffer.from(op.content, 'base64');
   const hash = computeHash(content);
 
-  fse.writeFileSync(fullPath, content);
+  writeFileWithSync(fullPath, content);
   gitAdd(vaultPath, op.path);
 
   return { index, success: true, hash };
@@ -122,7 +130,7 @@ export function processPushRename(
   // Optional content update after rename
   if (op.content) {
     const content = Buffer.from(op.content, 'base64');
-    fse.writeFileSync(newFullPath, content);
+    writeFileWithSync(newFullPath, content);
     gitAdd(vaultPath, op.path);
   }
 

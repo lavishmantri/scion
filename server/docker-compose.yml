@@ -6,6 +6,8 @@ services:
     image: scion-sync:latest
     container_name: scion-sync
     restart: unless-stopped
+    stop_signal: SIGTERM
+    stop_grace_period: 10s
 
     ports:
       - "${PORT:-3000}:3000"

@@ -1,6 +1,7 @@
 import Database from 'better-sqlite3';
 import { v4 as uuidv4 } from 'uuid';
 import path from 'path';
+import fs from 'fs';
 import fse from 'fs-extra';
 import { VAULT_ROOT } from './db.js';
 
@@ -94,6 +95,8 @@ export function getDatabase(vaultName: string): Database.Database {
 
   // Enable WAL mode for better concurrent access
   db.pragma('journal_mode = WAL');
+  // Force fsync on every commit — slower but survives power loss on SD card/SSD
+  db.pragma('synchronous = FULL');
 
   // Create tables if they don't exist
   db.exec(`
@@ -122,6 +125,46 @@ export function getDatabase(vaultName: string): Database.Database {
     CREATE INDEX IF NOT EXISTS idx_files_deleted ON files(deleted_at);
     CREATE INDEX IF NOT EXISTS idx_path_history_file ON path_history(file_id);
   `);
+
+  // Startup integrity check — detect corruption from power loss
+  const integrityResult = db.pragma('integrity_check') as Array<{ integrity_check: string }>;
+  if (integrityResult[0]?.integrity_check !== 'ok') {
+    console.error(`Database integrity check failed for vault "${vaultName}", rebuilding from manifest...`);
+    db.close();
+    // Delete corrupt DB and re-create
+    fse.removeSync(dbPath);
+    const freshDb = new Database(dbPath);
+    freshDb.pragma('journal_mode = WAL');
+    freshDb.pragma('synchronous = FULL');
+    freshDb.exec(`
+      CREATE TABLE IF NOT EXISTS files (
+        file_id TEXT PRIMARY KEY,
+        vault_id TEXT NOT NULL,
+        current_path TEXT NOT NULL,
+        content_hash TEXT,
+        git_commit TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        deleted_at INTEGER
+      );
+      CREATE TABLE IF NOT EXISTS path_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        file_id TEXT NOT NULL,
+        old_path TEXT NOT NULL,
+        new_path TEXT NOT NULL,
+        changed_at INTEGER NOT NULL,
+        FOREIGN KEY (file_id) REFERENCES files(file_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_files_hash ON files(content_hash);
+      CREATE INDEX IF NOT EXISTS idx_files_path ON files(vault_id, current_path);
+      CREATE INDEX IF NOT EXISTS idx_files_deleted ON files(deleted_at);
+      CREATE INDEX IF NOT EXISTS idx_path_history_file ON path_history(file_id);
+    `);
+    dbCache.set(vaultName, freshDb);
+    // Rebuild from manifest if available
+    rebuildFromManifest(vaultName);
+    return freshDb;
+  }
 
   dbCache.set(vaultName, db);
   return db;
@@ -398,7 +441,13 @@ export function updateGitManifest(vaultName: string): void {
   }
 
   const manifestPath = getManifestPath(vaultName);
-  fse.writeJsonSync(manifestPath, manifest, { spaces: 2 });
+  // Atomic write: write to temp file, fsync, then rename
+  const tmpPath = manifestPath + '.tmp';
+  fse.writeJsonSync(tmpPath, manifest, { spaces: 2 });
+  const fd = fs.openSync(tmpPath, 'r');
+  fs.fsyncSync(fd);
+  fs.closeSync(fd);
+  fse.renameSync(tmpPath, manifestPath);
 }
 
 /**

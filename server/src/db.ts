@@ -130,6 +130,23 @@ export function initVaultGit(vaultName: string): void {
 
   const gitDir = path.join(vaultPath, '.git');
   if (fse.existsSync(gitDir)) {
+    // Clean up dirty state from a crash mid-push
+    try {
+      const status = execFileSync('git', ['status', '--porcelain'], {
+        cwd: vaultPath, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
+      }).trim();
+      if (status) {
+        console.warn(`Git: Vault "${vaultName}" has uncommitted changes from a crash, resetting...`);
+        execFileSync('git', ['reset', '--hard', 'HEAD'], {
+          cwd: vaultPath, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
+        });
+        execFileSync('git', ['clean', '-fd'], {
+          cwd: vaultPath, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
+        });
+      }
+    } catch {
+      // Best effort cleanup
+    }
     console.log(`Git: Vault "${vaultName}" already initialized`);
     return;
   }
@@ -484,6 +501,22 @@ export function getFileRecord(vaultName: string, filePath: string): FileRecord |
     commit,
     updated_at: updatedAt,
   };
+}
+
+/**
+ * Run git gc --auto to prevent unbounded .git/objects growth.
+ * Only packs when loose object count exceeds threshold (~6700), so cheap to call often.
+ */
+export function gitGcAuto(vaultName: string): void {
+  try {
+    execFileSync('git', ['gc', '--auto'], {
+      cwd: getVaultPath(vaultName),
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+  } catch (err) {
+    console.warn(`git gc --auto failed for vault "${vaultName}":`, err);
+  }
 }
 
 /**

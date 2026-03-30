@@ -19,6 +19,7 @@ import {
   detectRename,
   renameFile,
   validateFilePath,
+  gitGcAuto,
 } from './db.js';
 import {
   getFileByPath,
@@ -404,6 +405,9 @@ server.post<{ Params: VaultParams; Body: PushBody }>(
       }
 
       const newHead = getHeadCommit(vaultName);
+
+      // Trigger auto gc to prevent unbounded .git/objects growth
+      gitGcAuto(vaultName);
 
       // Update metadata for created/modified files
       for (let i = 0; i < operations.length; i++) {
