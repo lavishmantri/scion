@@ -23,10 +23,14 @@ No shared code directory. Both use the same pull-before-push REST protocol.
 npm run dev          # Hot-reload dev server (tsx watch)
 npm run build        # TypeScript compile to dist/
 npm run start        # Run compiled server (node dist/index.js)
-npm test             # Run integration tests (basic + multi-client)
-node test/rename.test.js    # Run single test file
-node test/v2-sync.test.js   # Run V2 protocol tests
+npm test             # Run 2 of 4 test files (basic + multi-client only)
+node test/rename.test.js    # Rename tests (not in npm test)
+node test/v2-sync.test.js   # V2 protocol tests (not in npm test)
 ```
+
+Tests use plain Node.js (`node:assert` style) with a custom `SyncClient` helper in `test/helpers.js` — no jest/mocha/vitest. `helpers.js` exports `SyncClient`, `runTests`, `assert`, `assertEqual`, `computeHash`.
+
+> **Known issue**: `test/helpers.js` still calls the removed V1 `POST /sync` endpoint (line 33). All tests fail until it's updated to use the V2 `POST /vault/:name/push` endpoint.
 
 ### Plugin (`cd obsidian-plugin`)
 
@@ -74,7 +78,7 @@ Files are tracked by UUID (`file_id`) that survives renames. Rename detection us
 - Git: dirty state cleanup on startup (crash recovery), `gc --auto` after pushes
 - Docker: 10s graceful shutdown, 2s startup delay for filesystem settle
 
-## Key Server Files
+## Key Server Files (`server/src/`)
 
 | File | Responsibility |
 |------|---------------|
@@ -86,7 +90,7 @@ Files are tracked by UUID (`file_id`) that survives renames. Rename detection us
 | `config.ts` | Environment variable configuration |
 | `index.ts` | Entrypoint, graceful shutdown handlers |
 
-## Key Plugin Files
+## Key Plugin Files (`obsidian-plugin/src/`)
 
 | File | Responsibility |
 |------|---------------|
