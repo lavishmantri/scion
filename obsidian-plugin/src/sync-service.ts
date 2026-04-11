@@ -210,14 +210,8 @@ export class SyncService {
 
     const onRename = (file: TFile | TFolder, oldPath: string) => {
       if (this.ignoringFileEvents) return;
-      if (file instanceof TFile && shouldSyncFile(file.path) && shouldSyncFile(oldPath)) {
-        // Move syncState entry from old path to new path
-        const entry = this.syncState[oldPath];
-        if (entry) {
-          this.syncState[file.path] = entry;
-          delete this.syncState[oldPath];
-        }
-      }
+      // Don't move syncState entry — let collectLocalChanges detect it
+      // as delete(oldPath) + create(newPath) so the rename gets pushed
       this.debouncedSync();
     };
 
