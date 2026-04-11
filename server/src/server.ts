@@ -1,8 +1,11 @@
 import { execFileSync } from 'child_process';
 import Fastify from 'fastify';
+import type { TransportTargetOptions } from 'pino';
 import cors from '@fastify/cors';
 import fse from 'fs-extra';
 import { config } from './config.js';
+import { setLogger } from './logger.js';
+import { recordRequest, getClients, classifyOperation, type RequestEntry } from './request-tracker.js';
 import {
   VAULT_ROOT,
   getManifest,
@@ -37,12 +40,37 @@ import {
   type PushOperationResult,
 } from './push-operations.js';
 
+// Build Pino transport targets
+const targets: TransportTargetOptions[] = [
+  { target: 'pino/file', level: config.logLevel, options: { destination: 1 } },
+];
+
+if (config.axiomToken && config.axiomDataset) {
+  targets.push({
+    target: '@axiomhq/pino',
+    level: 'warn',
+    options: { dataset: config.axiomDataset, token: config.axiomToken },
+  });
+}
+
+if (config.axiomToken && config.axiomDatasetRequests) {
+  targets.push({
+    target: '@axiomhq/pino',
+    level: 'info',
+    options: { dataset: config.axiomDatasetRequests, token: config.axiomToken },
+  });
+}
+
 export const server = Fastify({
   logger: {
-    level: config.logLevel,
+    level: 'debug',
+    transport: { targets },
   },
   bodyLimit: 50 * 1024 * 1024, // 50MB
 });
+
+// Make logger available to non-route modules
+setLogger(server.log);
 
 // Register CORS plugin (allow all origins for self-hosted use)
 await server.register(cors, {
@@ -52,6 +80,44 @@ await server.register(cors, {
 
 // Ensure vault root directory exists
 await fse.ensureDir(VAULT_ROOT);
+
+// Enrich request log with client and vault context
+server.addHook('preHandler', (request, _reply, done) => {
+  const client = (request.headers['host'] || 'unknown') as string;
+  const params = request.params as Record<string, string> | undefined;
+  const bindings: Record<string, string> = { client };
+  if (params?.vaultName) bindings.vault = params.vaultName;
+  request.log = request.log.child(bindings);
+  done();
+});
+
+// Track all requests for /admin/clients endpoint
+server.addHook('onResponse', (request, reply, done) => {
+  const client = (request.headers['host'] || 'unknown') as string;
+  const params = request.params as Record<string, string> | undefined;
+  const operation = classifyOperation(request.method, request.url);
+
+  let detail: string | undefined;
+  if (operation === 'push') {
+    const body = request.body as { operations?: unknown[] } | undefined;
+    detail = body?.operations ? `${body.operations.length} ops` : undefined;
+  } else if (operation === 'pull:file') {
+    const filePath = (request.params as Record<string, string>)?.['*'];
+    detail = filePath;
+  }
+
+  const entry: RequestEntry = {
+    timestamp: new Date().toISOString(),
+    method: request.method,
+    operation,
+    vault: params?.vaultName || null,
+    statusCode: reply.statusCode,
+    responseTimeMs: Math.round(reply.elapsedTime),
+    detail,
+  };
+  recordRequest(client, entry);
+  done();
+});
 
 // Type definitions for route params
 interface VaultParams {
@@ -67,22 +133,25 @@ server.get('/health', async () => {
   return { status: 'ok' };
 });
 
+// GET /admin/clients - Show recent activity per client
+server.get('/admin/clients', async () => {
+  return getClients();
+});
+
 // GET /vault/:vaultName/manifest - Return all files with their metadata
 server.get<{ Params: VaultParams }>('/vault/:vaultName/manifest', async (request, reply) => {
   const { vaultName } = request.params;
 
   if (!validateVaultName(vaultName)) {
+    request.log.warn({ vaultName }, 'invalid vault name');
     return reply.status(400).send({ error: 'Invalid vault name' });
   }
 
-  console.log(`Server: GET /vault/${vaultName}/manifest`);
   initVaultGit(vaultName);
   const files = getManifest(vaultName);
   const headCommit = getHeadCommit(vaultName);
 
-  // Debug logging for sync troubleshooting
-  console.log(`[SYNC DEBUG] vault="${vaultName}" endpoint="/manifest"
-  server_head="${headCommit}" file_count=${files.length}`);
+  request.log.info({ fileCount: files.length, head: headCommit?.slice(0, 8) }, 'manifest served');
 
   return { files, head_commit: headCommit };
 });
@@ -99,7 +168,6 @@ server.get<{ Params: VaultParams }>('/vault/:vaultName/debug', async (request, r
   const files = getManifest(vaultName);
   const headCommit = getHeadCommit(vaultName);
 
-  // Get the latest file update time
   let lastModified: number | null = null;
   for (const file of files) {
     if (!lastModified || file.updated_at > lastModified) {
@@ -127,18 +195,17 @@ server.get<{ Params: VaultParams; Querystring: StatusQuery }>(
     const { since } = request.query;
 
     if (!validateVaultName(vaultName)) {
+      request.log.warn({ vaultName }, 'invalid vault name');
       return reply.status(400).send({ error: 'Invalid vault name' });
     }
 
-    console.log(`Server: GET /vault/${vaultName}/status?since=${since || 'null'}`);
     initVaultGit(vaultName);
-
     const { headCommit, changes } = getChangesSince(vaultName, since || null);
 
-    // Debug logging for sync troubleshooting
-    console.log(`[SYNC DEBUG] vault="${vaultName}" endpoint="/status"
-  client_since="${since || 'null'}" server_head="${headCommit}"
-  commits_match=${since === headCommit} changes=${changes.length}`);
+    request.log.info(
+      { since: since?.slice(0, 8) || null, head: headCommit?.slice(0, 8), changes: changes.length, match: since === headCommit },
+      'status checked'
+    );
 
     return {
       head_commit: headCommit,
@@ -161,24 +228,21 @@ server.get<{ Params: VaultFileParams }>('/vault/:vaultName/file/*', async (reque
     return reply.status(400).send({ error: 'Invalid file path' });
   }
 
-  console.log(`Server: GET /vault/${vaultName}/file/${filePath}`);
   const record = getFileRecord(vaultName, filePath);
 
   if (!record) {
-    console.log(`[SYNC DEBUG] vault="${vaultName}" endpoint="/file" path="${filePath}" status="not_found"`);
+    request.log.warn({ path: filePath }, 'file not found');
     return reply.status(404).send({ error: 'File not found' });
   }
 
   const content = getCurrentFile(vaultName, filePath);
 
   if (!content) {
-    console.log(`[SYNC DEBUG] vault="${vaultName}" endpoint="/file" path="${filePath}" status="not_on_disk"`);
+    request.log.warn({ path: filePath }, 'file not on disk');
     return reply.status(404).send({ error: 'File not found on disk' });
   }
 
-  // Debug logging for sync troubleshooting
-  console.log(`[SYNC DEBUG] vault="${vaultName}" endpoint="/file" path="${filePath}"
-  commit="${record.commit}" hash="${record.hash}" size=${content.length}`);
+  request.log.debug({ path: filePath, size: content.length }, 'file served');
 
   return reply
     .header('Content-Type', 'application/octet-stream')
@@ -202,9 +266,6 @@ server.delete<{ Params: VaultFileParams }>(
       return reply.status(400).send({ error: 'Invalid file path' });
     }
 
-    console.log(`Server: DELETE /vault/${vaultName}/file/${filePath}`);
-
-    // Get file_id before deletion for metadata tracking
     const metadata = getFileByPath(vaultName, filePath);
     if (metadata) {
       softDeleteFile(vaultName, metadata.file_id);
@@ -213,9 +274,11 @@ server.delete<{ Params: VaultFileParams }>(
     const deleted = deleteFile(vaultName, filePath);
 
     if (!deleted) {
+      request.log.warn({ path: filePath }, 'file not found for delete');
       return reply.status(404).send({ error: 'File not found' });
     }
 
+    request.log.info({ path: filePath }, 'file deleted');
     return { success: true, commit: getHeadCommit(vaultName) };
   }
 );
@@ -245,9 +308,12 @@ server.post<{ Params: VaultParams; Body: DetectRenameBody }>(
       return reply.status(400).send({ error: 'Invalid file path' });
     }
 
-    console.log(`Server: POST /vault/${vaultName}/detect-rename - ${missing_path}`);
-
     const result = detectRename(vaultName, missing_path, missing_hash, file_id);
+
+    request.log.info(
+      { missingPath: missing_path, found: result.found, newPath: result.newPath, method: result.method },
+      'rename detection'
+    );
 
     return {
       found: result.found,
@@ -284,14 +350,15 @@ server.post<{ Params: VaultParams; Body: RenameBody }>(
       return reply.status(400).send({ error: 'Invalid file path' });
     }
 
-    console.log(`Server: POST /vault/${vaultName}/rename - ${old_path} -> ${new_path}`);
-
     const newContent = content ? Buffer.from(content, 'base64') : undefined;
     const result = renameFile(vaultName, file_id, old_path, new_path, newContent);
 
     if (!result.success) {
+      request.log.warn({ oldPath: old_path, newPath: new_path, error: result.error }, 'rename failed');
       return reply.status(400).send({ error: result.error });
     }
+
+    request.log.info({ oldPath: old_path, newPath: new_path }, 'file renamed');
 
     const record = getFileRecord(vaultName, new_path);
 
@@ -317,6 +384,7 @@ server.post<{ Params: VaultParams; Body: PushBody }>(
     const { base_commit, operations } = request.body;
 
     if (!validateVaultName(vaultName)) {
+      request.log.warn({ vaultName }, 'invalid vault name');
       return reply.status(400).send({ error: 'Invalid vault name' });
     }
 
@@ -328,15 +396,22 @@ server.post<{ Params: VaultParams; Body: PushBody }>(
       return reply.status(400).send({ error: 'operations array is required' });
     }
 
-    console.log(`Server: POST /vault/${vaultName}/push - ${operations.length} op(s), base=${base_commit.slice(0, 8)}`);
+    const opTypes = operations.reduce((acc, op) => {
+      acc[op.type] = (acc[op.type] || 0) + 1;
+      return acc;
+    }, {} as Record<string, number>);
+
+    request.log.info({ opCount: operations.length, opTypes, base: base_commit.slice(0, 8) }, 'push started');
     initVaultGit(vaultName);
 
+    const pushStart = performance.now();
     const release = await vaultLock.acquire(vaultName);
     try {
       const head = getHeadCommit(vaultName);
 
       // Reject stale pushes
       if (base_commit !== head) {
+        request.log.warn({ base: base_commit.slice(0, 8), head: head?.slice(0, 8) }, 'push rejected: stale');
         return reply.status(409).send({
           error: 'stale',
           head_commit: head,
@@ -379,6 +454,7 @@ server.post<{ Params: VaultParams; Body: PushBody }>(
           } catch {
             // best effort
           }
+          request.log.warn({ opIndex: i, error: result.error }, 'push op failed, rolling back');
           return reply.status(400).send({
             success: false,
             results,
@@ -406,6 +482,7 @@ server.post<{ Params: VaultParams; Body: PushBody }>(
       }
 
       const newHead = getHeadCommit(vaultName);
+      const durationMs = Math.round(performance.now() - pushStart);
 
       // Trigger auto gc to prevent unbounded .git/objects growth
       gitGcAuto(vaultName);
@@ -423,6 +500,8 @@ server.post<{ Params: VaultParams; Body: PushBody }>(
           }
         }
       }
+
+      request.log.info({ opCount: operations.length, head: newHead?.slice(0, 8), durationMs }, 'push committed');
 
       return {
         success: true,
@@ -447,12 +526,10 @@ server.get<{ Params: FileByIdParams }>('/vault/:vaultName/file-by-id/:fileId', a
     return reply.status(400).send({ error: 'Invalid vault name' });
   }
 
-  console.log(`Server: GET /vault/${vaultName}/file-by-id/${fileId}`);
-
-  // Look up current path from metadata
   const fileMeta = getFileById(vaultName, fileId);
 
   if (!fileMeta || fileMeta.deleted_at) {
+    request.log.warn({ fileId }, 'file not found by id');
     return reply.status(404).send({ error: 'File not found' });
   }
 
@@ -466,6 +543,8 @@ server.get<{ Params: FileByIdParams }>('/vault/:vaultName/file-by-id/:fileId', a
     return reply.status(404).send({ error: 'File content not found' });
   }
 
+  request.log.debug({ fileId, path: fileMeta.current_path, size: content.length }, 'file served by id');
+
   return reply
     .header('Content-Type', 'application/octet-stream')
     .header('X-File-Id', record.file_id)
@@ -474,4 +553,3 @@ server.get<{ Params: FileByIdParams }>('/vault/:vaultName/file-by-id/:fileId', a
     .header('X-File-Hash', record.hash)
     .send(content);
 });
-

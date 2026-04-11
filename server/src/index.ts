@@ -9,7 +9,7 @@ const start = async () => {
     await new Promise(resolve => setTimeout(resolve, 2000));
 
     await server.listen({ port: config.port, host: config.host });
-    console.log(`Server listening on http://${config.host}:${config.port}`);
+    server.log.info({ host: config.host, port: config.port }, 'server listening');
   } catch (err) {
     server.log.error(err);
     process.exit(1);
@@ -18,14 +18,14 @@ const start = async () => {
 
 // Graceful shutdown
 process.on('SIGINT', async () => {
-  console.log('Shutting down...');
+  server.log.info('shutting down (SIGINT)');
   await server.close();
   closeAllDatabases();
   process.exit(0);
 });
 
 process.on('SIGTERM', async () => {
-  console.log('Shutting down...');
+  server.log.info('shutting down (SIGTERM)');
   await server.close();
   closeAllDatabases();
   process.exit(0);

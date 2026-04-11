@@ -9,6 +9,7 @@ import path from 'path';
 import fse from 'fs-extra';
 import { getVaultPath, computeHash, validateFilePath } from './db.js';
 import { ensureFileId, getFileByPath, getFileById, softDeleteFile } from './metadata.js';
+import { vaultLogger } from './logger.js';
 
 export type PushOperationType = 'create' | 'modify' | 'rename' | 'delete';
 
@@ -48,10 +49,14 @@ export function processPushCreate(
   op: PushOperation,
   index: number
 ): PushOperationResult {
+  const log = vaultLogger(vaultName, 'push:create');
+
   if (!op.content) {
+    log.warn({ index, path: op.path }, 'content missing');
     return { index, success: false, error: 'Content required for create' };
   }
   if (!validateFilePath(op.path)) {
+    log.warn({ index, path: op.path }, 'invalid path');
     return { index, success: false, error: 'Invalid file path' };
   }
 
@@ -59,6 +64,7 @@ export function processPushCreate(
   const fullPath = path.join(vaultPath, op.path);
 
   if (fse.existsSync(fullPath)) {
+    log.warn({ index, path: op.path }, 'file already exists');
     return { index, success: false, error: `File already exists: ${op.path}` };
   }
 
@@ -69,6 +75,7 @@ export function processPushCreate(
   writeFileWithSync(fullPath, content);
   gitAdd(vaultPath, op.path);
 
+  log.debug({ index, path: op.path, hash: hash.slice(0, 12), size: content.length }, 'file created');
   return { index, success: true, hash };
 }
 
@@ -77,10 +84,14 @@ export function processPushModify(
   op: PushOperation,
   index: number
 ): PushOperationResult {
+  const log = vaultLogger(vaultName, 'push:modify');
+
   if (!op.content) {
+    log.warn({ index, path: op.path }, 'content missing');
     return { index, success: false, error: 'Content required for modify' };
   }
   if (!validateFilePath(op.path)) {
+    log.warn({ index, path: op.path }, 'invalid path');
     return { index, success: false, error: 'Invalid file path' };
   }
 
@@ -88,6 +99,7 @@ export function processPushModify(
   const fullPath = path.join(vaultPath, op.path);
 
   if (!fse.existsSync(fullPath)) {
+    log.warn({ index, path: op.path }, 'file not found');
     return { index, success: false, error: `File not found: ${op.path}` };
   }
 
@@ -97,6 +109,7 @@ export function processPushModify(
   writeFileWithSync(fullPath, content);
   gitAdd(vaultPath, op.path);
 
+  log.debug({ index, path: op.path, hash: hash.slice(0, 12), size: content.length }, 'file modified');
   return { index, success: true, hash };
 }
 
@@ -105,10 +118,14 @@ export function processPushRename(
   op: PushOperation,
   index: number
 ): PushOperationResult {
+  const log = vaultLogger(vaultName, 'push:rename');
+
   if (!op.old_path) {
+    log.warn({ index, path: op.path }, 'old_path missing');
     return { index, success: false, error: 'old_path required for rename' };
   }
   if (!validateFilePath(op.path) || !validateFilePath(op.old_path)) {
+    log.warn({ index, oldPath: op.old_path, newPath: op.path }, 'invalid path');
     return { index, success: false, error: 'Invalid file path' };
   }
 
@@ -117,6 +134,7 @@ export function processPushRename(
   const newFullPath = path.join(vaultPath, op.path);
 
   if (!fse.existsSync(oldFullPath)) {
+    log.warn({ index, path: op.old_path }, 'file not found');
     return { index, success: false, error: `File not found: ${op.old_path}` };
   }
 
@@ -137,6 +155,7 @@ export function processPushRename(
   const finalContent = fse.readFileSync(newFullPath);
   const hash = computeHash(finalContent);
 
+  log.debug({ index, oldPath: op.old_path, newPath: op.path, hash: hash.slice(0, 12) }, 'file renamed');
   return { index, success: true, hash };
 }
 
@@ -145,7 +164,10 @@ export function processPushDelete(
   op: PushOperation,
   index: number
 ): PushOperationResult {
+  const log = vaultLogger(vaultName, 'push:delete');
+
   if (!validateFilePath(op.path)) {
+    log.warn({ index, path: op.path }, 'invalid path');
     return { index, success: false, error: 'Invalid file path' };
   }
 
@@ -153,6 +175,7 @@ export function processPushDelete(
   const fullPath = path.join(vaultPath, op.path);
 
   if (!fse.existsSync(fullPath)) {
+    log.warn({ index, path: op.path }, 'file not found');
     return { index, success: false, error: `File not found: ${op.path}` };
   }
 
@@ -165,5 +188,6 @@ export function processPushDelete(
   fse.removeSync(fullPath);
   gitAdd(vaultPath, op.path);
 
+  log.debug({ index, path: op.path }, 'file deleted');
   return { index, success: true, file_id: meta?.file_id };
 }

@@ -17,6 +17,9 @@ services:
       - HOST=0.0.0.0
       - LOG_LEVEL=${LOG_LEVEL:-info}
       - VAULT_PATH=/data/vault
+      - AXIOM_TOKEN=${AXIOM_TOKEN:-}
+      - AXIOM_DATASET=${AXIOM_DATASET:-}
+      - AXIOM_DATASET_REQUESTS=${AXIOM_DATASET_REQUESTS:-}
 
     volumes:
       # Mount host vault directory to container

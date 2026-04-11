@@ -4,6 +4,7 @@ import path from 'path';
 import fs from 'fs';
 import fse from 'fs-extra';
 import { VAULT_ROOT } from './db.js';
+import { getLogger, vaultLogger } from './logger.js';
 
 const SCION_DIR = '.scion';
 const DB_FILE = 'metadata.db';
@@ -129,7 +130,7 @@ export function getDatabase(vaultName: string): Database.Database {
   // Startup integrity check — detect corruption from power loss
   const integrityResult = db.pragma('integrity_check') as Array<{ integrity_check: string }>;
   if (integrityResult[0]?.integrity_check !== 'ok') {
-    console.error(`Database integrity check failed for vault "${vaultName}", rebuilding from manifest...`);
+    vaultLogger(vaultName, 'metadata').error('database integrity check failed, rebuilding');
     db.close();
     // Delete corrupt DB and re-create
     fse.removeSync(dbPath);
@@ -189,7 +190,7 @@ export function closeAllDatabases(): void {
     try {
       db.close();
     } catch (err) {
-      console.error(`Failed to close database for vault "${vaultName}":`, err);
+      getLogger().error({ vault: vaultName, err }, 'failed to close database');
     }
   }
   dbCache.clear();
@@ -471,7 +472,7 @@ export function loadGitManifest(vaultName: string): GitManifest | null {
 export function rebuildFromManifest(vaultName: string): boolean {
   const manifest = loadGitManifest(vaultName);
   if (!manifest) {
-    console.warn(`No manifest found for vault ${vaultName}`);
+    vaultLogger(vaultName, 'recovery').warn('no manifest found for rebuild');
     return false;
   }
 
@@ -490,7 +491,7 @@ export function rebuildFromManifest(vaultName: string): boolean {
   });
 
   transaction();
-  console.log(`Rebuilt metadata for vault ${vaultName} from manifest: ${Object.keys(manifest.files).length} files`);
+  vaultLogger(vaultName, 'recovery').info({ fileCount: Object.keys(manifest.files).length }, 'metadata rebuilt from manifest');
   return true;
 }
 
@@ -514,7 +515,7 @@ export function detectRenameByHash(
 
   // Multiple matches - ambiguous, return null
   if (candidates.length > 1) {
-    console.warn(`Ambiguous rename detection: ${candidates.length} files match hash ${contentHash}`);
+    vaultLogger(vaultName, 'rename-detect').warn({ hash: contentHash, candidateCount: candidates.length }, 'ambiguous rename detection');
   }
 
   return null;

@@ -3,6 +3,7 @@ import path from 'path';
 import fse from 'fs-extra';
 import { createHash } from 'crypto';
 import { config } from './config.js';
+import { vaultLogger } from './logger.js';
 import {
   getDatabase,
   ensureFileId,
@@ -136,7 +137,7 @@ export function initVaultGit(vaultName: string): void {
         cwd: vaultPath, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
       }).trim();
       if (status) {
-        console.warn(`Git: Vault "${vaultName}" has uncommitted changes from a crash, resetting...`);
+        vaultLogger(vaultName, 'init').warn('uncommitted changes detected, resetting');
         execFileSync('git', ['reset', '--hard', 'HEAD'], {
           cwd: vaultPath, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
         });
@@ -147,7 +148,7 @@ export function initVaultGit(vaultName: string): void {
     } catch {
       // Best effort cleanup
     }
-    console.log(`Git: Vault "${vaultName}" already initialized`);
+    vaultLogger(vaultName, 'init').debug('vault already initialized');
     return;
   }
 
@@ -173,7 +174,7 @@ Thumbs.db
   execFileSync('git', ['add', '.gitignore'], { cwd: vaultPath, stdio: 'pipe' });
   execFileSync('git', ['commit', '-m', 'Initialize vault'], { cwd: vaultPath, stdio: 'pipe' });
 
-  console.log(`Git: Initialized vault "${vaultName}" at ${vaultPath}`);
+  vaultLogger(vaultName, 'init').info({ path: vaultPath }, 'vault initialized');
 }
 
 /**
@@ -293,7 +294,7 @@ export function deleteFile(vaultName: string, filePath: string): boolean {
  * Called automatically during getManifest if metadata doesn't exist
  */
 export function bootstrapVaultMetadata(vaultName: string): void {
-  console.log(`Bootstrapping metadata for vault "${vaultName}"...`);
+  vaultLogger(vaultName, 'bootstrap').info('bootstrapping metadata');
 
   const vaultPath = getVaultPath(vaultName);
 
@@ -338,7 +339,7 @@ export function bootstrapVaultMetadata(vaultName: string): void {
     // Might already be committed or nothing to commit
   }
 
-  console.log(`Bootstrapped ${files.length} files for vault "${vaultName}"`);
+  vaultLogger(vaultName, 'bootstrap').info({ fileCount: files.length }, 'metadata bootstrapped');
 }
 
 /**
@@ -515,7 +516,7 @@ export function gitGcAuto(vaultName: string): void {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
   } catch (err) {
-    console.warn(`git gc --auto failed for vault "${vaultName}":`, err);
+    vaultLogger(vaultName, 'gc').warn({ err }, 'git gc --auto failed');
   }
 }
 
