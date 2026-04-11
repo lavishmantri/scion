@@ -1,5 +1,4 @@
 import { App, Notice, TFile, TFolder, Vault, EventRef } from 'obsidian';
-import { createHash } from 'crypto';
 
 // --- Types ---
 
@@ -77,14 +76,19 @@ const MAX_RETRY = 3;
 
 // --- Helpers ---
 
-function computeHash(content: ArrayBuffer): string {
-  const hash = createHash('sha256');
-  hash.update(Buffer.from(content));
-  return hash.digest('hex');
+async function computeHash(content: ArrayBuffer): Promise<string> {
+  const hashBuffer = await crypto.subtle.digest('SHA-256', content);
+  const hashArray = new Uint8Array(hashBuffer);
+  return Array.from(hashArray).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
 function arrayBufferToBase64(buf: ArrayBuffer): string {
-  return Buffer.from(buf).toString('base64');
+  const bytes = new Uint8Array(buf);
+  let binary = '';
+  for (let i = 0; i < bytes.byteLength; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
 }
 
 function makeConflictPath(originalPath: string): string {
@@ -332,7 +336,7 @@ export class SyncService {
     let localModified = false;
     if (localFile instanceof TFile && localEntry) {
       const localContent = await this.vault.readBinary(localFile);
-      const localHash = computeHash(localContent);
+      const localHash = await computeHash(localContent);
       if (localHash !== localEntry.hash) {
         localModified = true;
       }
@@ -397,7 +401,7 @@ export class SyncService {
 
     if (localFile instanceof TFile && localEntry) {
       const localContent = await this.vault.readBinary(localFile);
-      const localHash = computeHash(localContent);
+      const localHash = await computeHash(localContent);
 
       if (localHash === localEntry.hash) {
         // Local unchanged: safe to delete
@@ -445,7 +449,7 @@ export class SyncService {
     // Creates and modifies
     for (const file of localFiles) {
       const content = await this.vault.readBinary(file);
-      const hash = computeHash(content);
+      const hash = await computeHash(content);
       const entry = this.syncState[file.path];
 
       if (!entry) {
