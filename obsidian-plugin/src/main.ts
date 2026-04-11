@@ -9,6 +9,7 @@ interface ScionSyncData {
 
 const DEFAULT_SETTINGS: ScionSyncSettings = {
   serverUrl: 'http://localhost:3000',
+  deviceName: '',
   pollInterval: 300, // 5 minutes
   autoSync: true,
   syncOnStartup: true,
@@ -185,6 +186,20 @@ class ScionSyncSettingTab extends PluginSettingTab {
           .onChange(async (value) => {
             this.plugin.settings.serverUrl = value;
             await this.plugin.saveSettings();
+          })
+      );
+
+    new Setting(containerEl)
+      .setName('Device name')
+      .setDesc('Identifies this device in server logs (e.g. "iPhone", "MacBook")')
+      .addText((text) =>
+        text
+          .setPlaceholder('e.g. iPhone, MacBook')
+          .setValue(this.plugin.settings.deviceName)
+          .onChange(async (value) => {
+            this.plugin.settings.deviceName = value;
+            await this.plugin.saveSettings();
+            this.plugin.getSyncService()?.updateSettings(this.plugin.settings);
           })
       );
 

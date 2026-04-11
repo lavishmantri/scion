@@ -63,6 +63,7 @@ interface PushResponse {
 
 export interface ScionSyncSettings {
   serverUrl: string;
+  deviceName: string;
   pollInterval: number; // seconds (30-600, default 300)
   autoSync: boolean;
   syncOnStartup: boolean;
@@ -536,8 +537,12 @@ export class SyncService {
   private async fetchWithTimeout(url: string, options?: RequestInit): Promise<Response> {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+    const headers = new Headers(options?.headers);
+    if (this.settings.deviceName) {
+      headers.set('X-Scion-Device', this.settings.deviceName);
+    }
     try {
-      return await fetch(url, { ...options, signal: controller.signal });
+      return await fetch(url, { ...options, headers, signal: controller.signal });
     } finally {
       clearTimeout(timeout);
     }

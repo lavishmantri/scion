@@ -83,9 +83,9 @@ await fse.ensureDir(VAULT_ROOT);
 
 // Enrich request log with client and vault context
 server.addHook('preHandler', (request, _reply, done) => {
-  const client = (request.headers['host'] || 'unknown') as string;
+  const device = (request.headers['x-scion-device'] || request.headers['host'] || 'unknown') as string;
   const params = request.params as Record<string, string> | undefined;
-  const bindings: Record<string, string> = { client };
+  const bindings: Record<string, string> = { device };
   if (params?.vaultName) bindings.vault = params.vaultName;
   request.log = request.log.child(bindings);
   done();
@@ -93,7 +93,7 @@ server.addHook('preHandler', (request, _reply, done) => {
 
 // Track all requests for /admin/clients endpoint
 server.addHook('onResponse', (request, reply, done) => {
-  const client = (request.headers['host'] || 'unknown') as string;
+  const client = (request.headers['x-scion-device'] || request.headers['host'] || 'unknown') as string;
   const params = request.params as Record<string, string> | undefined;
   const operation = classifyOperation(request.method, request.url);
 
