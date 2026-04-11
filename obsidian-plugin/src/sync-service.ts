@@ -386,9 +386,10 @@ export class SyncService {
       }
     }
 
-    // Update sync state to server version
+    // Update sync state with locally-computed hash (matches what collectLocalChanges computes)
+    const localHash = await computeHash(serverContent);
     this.syncState[filePath] = {
-      hash: serverHash,
+      hash: localHash,
       commit: serverCommit,
     };
   }

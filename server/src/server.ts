@@ -398,8 +398,9 @@ server.post<{ Params: VaultParams; Body: PushBody }>(
           stdio: ['pipe', 'pipe', 'pipe'],
         });
       } catch (error: unknown) {
-        const execError = error as { message?: string };
-        if (!execError.message?.includes('nothing to commit')) {
+        const execError = error as { message?: string; stdout?: string };
+        const errText = `${execError.message || ''} ${execError.stdout || ''}`;
+        if (!errText.includes('nothing to commit')) {
           throw error;
         }
       }
