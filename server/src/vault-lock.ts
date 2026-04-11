@@ -23,13 +23,13 @@ export class VaultLock {
     if (waitMs > 5) {
       log.info({ waitMs }, 'lock acquired after wait');
     } else {
-      log.debug({ waitMs }, 'lock acquired');
+      log.trace({ waitMs }, 'lock acquired');
     }
 
     const holdStart = performance.now();
     return () => {
       const holdMs = Math.round(performance.now() - holdStart);
-      log.debug({ holdMs }, 'lock released');
+      log.trace({ holdMs }, 'lock released');
       release();
     };
   }

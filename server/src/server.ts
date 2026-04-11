@@ -66,6 +66,7 @@ export const server = Fastify({
     level: 'debug',
     transport: { targets },
   },
+  disableRequestLogging: true,
   bodyLimit: 50 * 1024 * 1024, // 50MB
 });
 
@@ -81,7 +82,7 @@ await server.register(cors, {
 // Ensure vault root directory exists
 await fse.ensureDir(VAULT_ROOT);
 
-// Enrich request log with client and vault context
+// Enrich request log with device and vault context
 server.addHook('preHandler', (request, _reply, done) => {
   const device = (request.headers['x-scion-device'] || request.headers['host'] || 'unknown') as string;
   const params = request.params as Record<string, string> | undefined;
@@ -91,31 +92,53 @@ server.addHook('preHandler', (request, _reply, done) => {
   done();
 });
 
-// Track all requests for /admin/clients endpoint
+// Single wide event per request + request tracker
 server.addHook('onResponse', (request, reply, done) => {
-  const client = (request.headers['x-scion-device'] || request.headers['host'] || 'unknown') as string;
+  const device = (request.headers['x-scion-device'] || request.headers['host'] || 'unknown') as string;
   const params = request.params as Record<string, string> | undefined;
-  const operation = classifyOperation(request.method, request.url);
+  const op = classifyOperation(request.method, request.url);
+  const vault = params?.vaultName || null;
+  const ms = Math.round(reply.elapsedTime);
+  const status = reply.statusCode;
 
+  // Build detail string for push/file operations
   let detail: string | undefined;
-  if (operation === 'push') {
+  if (op === 'push') {
     const body = request.body as { operations?: unknown[] } | undefined;
     detail = body?.operations ? `${body.operations.length} ops` : undefined;
-  } else if (operation === 'pull:file') {
-    const filePath = (request.params as Record<string, string>)?.['*'];
-    detail = filePath;
+  } else if (op === 'pull:file') {
+    detail = (request.params as Record<string, string>)?.['*'];
   }
 
-  const entry: RequestEntry = {
+  // Record for /admin/clients
+  recordRequest(device, {
     timestamp: new Date().toISOString(),
     method: request.method,
-    operation,
-    vault: params?.vaultName || null,
-    statusCode: reply.statusCode,
-    responseTimeMs: Math.round(reply.elapsedTime),
+    operation: op,
+    vault,
+    statusCode: status,
+    responseTimeMs: ms,
     detail,
+  });
+
+  // Wide event log — one line per request
+  const logData: Record<string, unknown> = {
+    method: request.method,
+    url: request.url,
+    status,
+    ms,
+    op,
   };
-  recordRequest(client, entry);
+  if (vault) logData.vault = vault;
+  if (detail) logData.detail = detail;
+
+  // Filter noise: health checks and OPTIONS at debug, everything else at info
+  if (op === 'health' || op === 'admin' || request.method === 'OPTIONS') {
+    request.log.debug(logData, `${request.method} ${status}`);
+  } else {
+    request.log.info(logData, `${request.method} ${status}`);
+  }
+
   done();
 });
 
@@ -150,8 +173,6 @@ server.get<{ Params: VaultParams }>('/vault/:vaultName/manifest', async (request
   initVaultGit(vaultName);
   const files = getManifest(vaultName);
   const headCommit = getHeadCommit(vaultName);
-
-  request.log.info({ fileCount: files.length, head: headCommit?.slice(0, 8) }, 'manifest served');
 
   return { files, head_commit: headCommit };
 });
@@ -202,11 +223,6 @@ server.get<{ Params: VaultParams; Querystring: StatusQuery }>(
     initVaultGit(vaultName);
     const { headCommit, changes } = getChangesSince(vaultName, since || null);
 
-    request.log.info(
-      { since: since?.slice(0, 8) || null, head: headCommit?.slice(0, 8), changes: changes.length, match: since === headCommit },
-      'status checked'
-    );
-
     return {
       head_commit: headCommit,
       changes,
@@ -242,8 +258,6 @@ server.get<{ Params: VaultFileParams }>('/vault/:vaultName/file/*', async (reque
     return reply.status(404).send({ error: 'File not found on disk' });
   }
 
-  request.log.debug({ path: filePath, size: content.length }, 'file served');
-
   return reply
     .header('Content-Type', 'application/octet-stream')
     .header('X-File-Commit', record.commit)
@@ -278,7 +292,6 @@ server.delete<{ Params: VaultFileParams }>(
       return reply.status(404).send({ error: 'File not found' });
     }
 
-    request.log.info({ path: filePath }, 'file deleted');
     return { success: true, commit: getHeadCommit(vaultName) };
   }
 );
@@ -309,11 +322,6 @@ server.post<{ Params: VaultParams; Body: DetectRenameBody }>(
     }
 
     const result = detectRename(vaultName, missing_path, missing_hash, file_id);
-
-    request.log.info(
-      { missingPath: missing_path, found: result.found, newPath: result.newPath, method: result.method },
-      'rename detection'
-    );
 
     return {
       found: result.found,
@@ -357,8 +365,6 @@ server.post<{ Params: VaultParams; Body: RenameBody }>(
       request.log.warn({ oldPath: old_path, newPath: new_path, error: result.error }, 'rename failed');
       return reply.status(400).send({ error: result.error });
     }
-
-    request.log.info({ oldPath: old_path, newPath: new_path }, 'file renamed');
 
     const record = getFileRecord(vaultName, new_path);
 
@@ -542,8 +548,6 @@ server.get<{ Params: FileByIdParams }>('/vault/:vaultName/file-by-id/:fileId', a
   if (!content) {
     return reply.status(404).send({ error: 'File content not found' });
   }
-
-  request.log.debug({ fileId, path: fileMeta.current_path, size: content.length }, 'file served by id');
 
   return reply
     .header('Content-Type', 'application/octet-stream')
