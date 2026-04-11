@@ -24,11 +24,13 @@ CLI / Bot ────────┘                       ├── SQLite (me
 scion/
 ├── server/              # Node.js Fastify backend (ES modules)
 │   ├── src/
-│   │   ├── server.ts    # REST route handlers
+│   │   ├── server.ts    # REST route handlers, hooks, admin endpoints
 │   │   ├── db.ts        # Git operations, file identity, rename detection
 │   │   ├── metadata.ts  # SQLite schema, UUID management, manifest
 │   │   ├── push-operations.ts  # Batch create/modify/rename/delete
 │   │   ├── vault-lock.ts      # Per-vault mutex for concurrent pushes
+│   │   ├── logger.ts    # Pino logger singleton for non-route modules
+│   │   ├── request-tracker.ts  # In-memory per-client request history
 │   │   ├── config.ts    # Environment variable config
 │   │   └── index.ts     # Entrypoint, graceful shutdown
 │   ├── test/            # Integration tests
@@ -70,7 +72,11 @@ npm start
 
 ### 2. Plugin Setup
 
-**Prerequisites**: Node.js 20+
+**Option A: BRAT (recommended for mobile)**
+
+Install the [BRAT](https://github.com/TfTHacker/obsidian42-brat) community plugin, then add this repo (`lavishmantri/scion`) as a beta plugin. BRAT handles installation and updates on all devices including iOS/Android.
+
+**Option B: Manual install**
 
 ```bash
 cd obsidian-plugin
@@ -78,15 +84,16 @@ npm install
 npm run build
 ```
 
-This produces `main.js`. Copy it along with `manifest.json` and `styles.css` into your Obsidian vault:
+Copy `main.js`, `manifest.json`, and `styles.css` into your vault:
 
 ```bash
-# Replace <vault> with your Obsidian vault path
 mkdir -p <vault>/.obsidian/plugins/scion-sync
 cp main.js manifest.json styles.css <vault>/.obsidian/plugins/scion-sync/
 ```
 
 Restart Obsidian, enable "Scion Sync" in Settings > Community Plugins.
+
+> The plugin works on both desktop (macOS/Windows/Linux) and mobile (iOS/Android). It uses Web Crypto API and standard browser APIs only — no Node.js dependencies at runtime.
 
 ### 3. Configure the Plugin
 
@@ -122,6 +129,9 @@ See [HARDWARE.md](HARDWARE.md) for the complete Raspberry Pi 4 setup guide: SSD 
 | `HOST` | `0.0.0.0` | Bind address |
 | `LOG_LEVEL` | `info` | `trace`, `debug`, `info`, `warn`, `error` |
 | `VAULT_PATH` | `./vault` | Where vaults are stored (Docker: `/data/vault`) |
+| `AXIOM_TOKEN` | _(none)_ | Axiom API token. Enables remote log shipping (warn+ level). |
+| `AXIOM_DATASET` | _(none)_ | Axiom dataset for error/warning logs. |
+| `AXIOM_DATASET_REQUESTS` | _(none)_ | Axiom dataset for all request summaries (optional second dataset). |
 
 ## API
 
@@ -130,6 +140,7 @@ All endpoints are under `/vault/:vaultName/`.
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `GET` | `/health` | Health check |
+| `GET` | `/admin/clients` | Per-client request history (last 50 per device) |
 | `GET` | `/vault/:name/manifest` | List all files with hashes, commit, file_id |
 | `GET` | `/vault/:name/status?since=<commit>` | Changes since a commit (for polling) |
 | `GET` | `/vault/:name/file/*` | Download file content by path |
@@ -197,6 +208,22 @@ Files are tracked by UUID (`file_id`) that survives renames. Rename detection us
 ### Multi-Vault
 
 Vault names validated against `/^[a-zA-Z0-9_\- ]+$/` to prevent path traversal. Each vault has its own git repo, SQLite database, and lock.
+
+### Observability
+
+All logs are structured JSON via [Pino](https://github.com/pinojs/pino) (Fastify's built-in logger). Every log line includes `reqId` for request correlation and `client` for device identification.
+
+**Client tracking**: `GET /admin/clients` returns the last 50 requests per client device with operation type, status code, and response time. Useful for verifying sync is working across devices.
+
+**Log levels**:
+| Level | Content |
+|-------|---------|
+| `debug` | Per-file push details, lock acquire/release, git internals |
+| `info` | Push summaries with timing, manifest/status served, startup |
+| `warn` | 400/404/409 responses, crash recovery, git gc failures |
+| `error` | Database corruption, unhandled exceptions |
+
+**Axiom** (optional): Set `AXIOM_TOKEN` and `AXIOM_DATASET` to ship warn+ logs to [Axiom](https://axiom.co) (free tier: 500 GB/mo). Add `AXIOM_DATASET_REQUESTS` for a second dataset with all request summaries.
 
 ### Security
 
