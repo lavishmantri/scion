@@ -51,7 +51,7 @@ export function processPushCreate(
 ): PushOperationResult {
   const log = vaultLogger(vaultName, 'push:create');
 
-  if (!op.content) {
+  if (op.content == null) {
     log.warn({ index, path: op.path }, 'content missing');
     return { index, success: false, error: 'Content required for create' };
   }
@@ -86,7 +86,7 @@ export function processPushModify(
 ): PushOperationResult {
   const log = vaultLogger(vaultName, 'push:modify');
 
-  if (!op.content) {
+  if (op.content == null) {
     log.warn({ index, path: op.path }, 'content missing');
     return { index, success: false, error: 'Content required for modify' };
   }
