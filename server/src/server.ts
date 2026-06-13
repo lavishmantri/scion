@@ -82,6 +82,21 @@ await server.register(cors, {
 // Ensure vault root directory exists
 await fse.ensureDir(VAULT_ROOT);
 
+server.setErrorHandler((error: Error & { statusCode?: number; code?: string }, request, reply) => {
+  request.log.error(
+    {
+      err: {
+        message: error.message,
+        stack: error.stack,
+        code: (error as NodeJS.ErrnoException).code,
+      },
+      status: error.statusCode ?? 500,
+    },
+    'unhandled error'
+  );
+  reply.status(error.statusCode ?? 500).send({ error: error.message });
+});
+
 // Enrich request log with device and vault context
 server.addHook('preHandler', (request, _reply, done) => {
   const device = (request.headers['x-scion-device'] || request.headers['host'] || 'unknown') as string;
@@ -129,6 +144,7 @@ server.addHook('onResponse', (request, reply, done) => {
     ms,
     op,
   };
+  if (status >= 500) logData.error = true;
   if (vault) logData.vault = vault;
   if (detail) logData.detail = detail;
 
