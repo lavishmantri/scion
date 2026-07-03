@@ -50,6 +50,7 @@ export function processPushCreate(
   index: number
 ): PushOperationResult {
   const log = vaultLogger(vaultName, 'push:create');
+  log.info({ index, path: op.path }, 'op start');
 
   if (op.content == null) {
     log.warn({ index, path: op.path }, 'content missing');
@@ -75,7 +76,7 @@ export function processPushCreate(
   writeFileWithSync(fullPath, content);
   gitAdd(vaultPath, op.path);
 
-  log.debug({ index, path: op.path, hash: hash.slice(0, 12), size: content.length }, 'file created');
+  log.info({ index, path: op.path, hash: hash.slice(0, 12), size: content.length }, 'file created');
   return { index, success: true, hash };
 }
 
@@ -85,6 +86,7 @@ export function processPushModify(
   index: number
 ): PushOperationResult {
   const log = vaultLogger(vaultName, 'push:modify');
+  log.info({ index, path: op.path }, 'op start');
 
   if (op.content == null) {
     log.warn({ index, path: op.path }, 'content missing');
@@ -109,7 +111,7 @@ export function processPushModify(
   writeFileWithSync(fullPath, content);
   gitAdd(vaultPath, op.path);
 
-  log.debug({ index, path: op.path, hash: hash.slice(0, 12), size: content.length }, 'file modified');
+  log.info({ index, path: op.path, hash: hash.slice(0, 12), size: content.length }, 'file modified');
   return { index, success: true, hash };
 }
 
@@ -119,6 +121,7 @@ export function processPushRename(
   index: number
 ): PushOperationResult {
   const log = vaultLogger(vaultName, 'push:rename');
+  log.info({ index, path: op.path, oldPath: op.old_path }, 'op start');
 
   if (!op.old_path) {
     log.warn({ index, path: op.path }, 'old_path missing');
@@ -155,7 +158,7 @@ export function processPushRename(
   const finalContent = fse.readFileSync(newFullPath);
   const hash = computeHash(finalContent);
 
-  log.debug({ index, oldPath: op.old_path, newPath: op.path, hash: hash.slice(0, 12) }, 'file renamed');
+  log.info({ index, oldPath: op.old_path, newPath: op.path, hash: hash.slice(0, 12) }, 'file renamed');
   return { index, success: true, hash };
 }
 
@@ -165,6 +168,7 @@ export function processPushDelete(
   index: number
 ): PushOperationResult {
   const log = vaultLogger(vaultName, 'push:delete');
+  log.info({ index, path: op.path }, 'op start');
 
   if (!validateFilePath(op.path)) {
     log.warn({ index, path: op.path }, 'invalid path');
@@ -188,6 +192,6 @@ export function processPushDelete(
   fse.removeSync(fullPath);
   gitAdd(vaultPath, op.path);
 
-  log.debug({ index, path: op.path }, 'file deleted');
+  log.info({ index, path: op.path }, 'file deleted');
   return { index, success: true, file_id: meta?.file_id };
 }

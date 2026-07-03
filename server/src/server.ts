@@ -145,6 +145,12 @@ server.addHook('onResponse', (request, reply, done) => {
     op,
   };
   if (status >= 500) logData.error = true;
+  if (status >= 400 && op === 'push') {
+    const body = request.body as { operations?: PushOperation[] } | undefined;
+    if (body?.operations) {
+      logData.failedOps = body.operations.map(o => ({ type: o.type, path: o.path }));
+    }
+  }
   if (vault) logData.vault = vault;
   if (detail) logData.detail = detail;
 
@@ -476,7 +482,7 @@ server.post<{ Params: VaultParams; Body: PushBody }>(
           } catch {
             // best effort
           }
-          request.log.warn({ opIndex: i, error: result.error }, 'push op failed, rolling back');
+          request.log.warn({ opIndex: i, opType: op.type, path: op.path, error: result.error }, 'push op failed, rolling back');
           return reply.status(400).send({
             success: false,
             results,
@@ -485,6 +491,11 @@ server.post<{ Params: VaultParams; Body: PushBody }>(
           });
         }
       }
+
+      request.log.info(
+        { ops: results.map(r => ({ i: r.index, type: operations[r.index].type, path: operations[r.index].path, ok: r.success, err: r.error ?? null })) },
+        'push ops summary'
+      );
 
       // Single atomic commit for all operations
       const vaultPath = getVaultPath(vaultName);
