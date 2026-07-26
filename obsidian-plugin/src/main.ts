@@ -5,10 +5,16 @@ interface ScionSyncData {
   settings: ScionSyncSettings;
   syncState: Record<string, { hash: string; commit: string; file_id?: string }>;
   lastSyncedCommit: string | null;
+  lastBackend: 'server' | 'r2' | null;
 }
 
 const DEFAULT_SETTINGS: ScionSyncSettings = {
+  backend: 'server', // existing installs must keep working against the Pi unchanged
   serverUrl: 'http://localhost:3000',
+  r2AccountId: '',
+  r2Bucket: '',
+  r2AccessKeyId: '',
+  r2SecretAccessKey: '',
   deviceName: '',
   pollInterval: 300, // 5 minutes
   autoSync: true,
@@ -21,6 +27,7 @@ export default class ScionSyncPlugin extends Plugin {
   private syncService: SyncService | null = null;
   private syncState: Record<string, { hash: string; commit: string; file_id?: string }> = {};
   private lastSyncedCommit: string | null = null;
+  private lastBackend: 'server' | 'r2' | null = null;
   private statusBarItem: HTMLElement | null = null;
 
   async onload() {
@@ -44,15 +51,22 @@ export default class ScionSyncPlugin extends Plugin {
       this.syncState,
       this.lastSyncedCommit,
       async (data) => {
-        const d = data as { syncState: typeof this.syncState; lastSyncedCommit: string | null };
+        const d = data as {
+          syncState: typeof this.syncState;
+          lastSyncedCommit: string | null;
+          lastBackend?: 'server' | 'r2' | null;
+        };
         this.syncState = d.syncState;
         this.lastSyncedCommit = d.lastSyncedCommit;
+        if (d.lastBackend !== undefined) this.lastBackend = d.lastBackend;
         await this.saveData({
           settings: this.settings,
           syncState: this.syncState,
           lastSyncedCommit: this.lastSyncedCommit,
+          lastBackend: this.lastBackend,
         });
-      }
+      },
+      this.lastBackend
     );
 
     this.syncService.setStatusCallback((status, message) => {
@@ -121,6 +135,7 @@ export default class ScionSyncPlugin extends Plugin {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, data?.settings);
     this.syncState = data?.syncState || {};
     this.lastSyncedCommit = data?.lastSyncedCommit || null;
+    this.lastBackend = data?.lastBackend ?? null;
   }
 
   async saveSettings() {
@@ -128,7 +143,17 @@ export default class ScionSyncPlugin extends Plugin {
       settings: this.settings,
       syncState: this.syncState,
       lastSyncedCommit: this.lastSyncedCommit,
+      lastBackend: this.lastBackend,
     });
+  }
+
+  /** Wipes local sync bookkeeping so this device can bootstrap fresh against
+   * whichever backend is currently selected. Used when switching backends —
+   * see the split-brain guard in SyncService.syncAll(). Does not touch any
+   * remote data on either backend. */
+  async resetLocalSyncState() {
+    await this.syncService?.resetSyncState();
+    new Notice('Local sync state cleared. Next sync will do a full pull from the current backend.');
   }
 
   getSyncService(): SyncService | null {
@@ -177,17 +202,91 @@ class ScionSyncSettingTab extends PluginSettingTab {
     containerEl.createEl('h2', { text: 'Scion Sync Settings' });
 
     new Setting(containerEl)
-      .setName('Server URL')
-      .setDesc('The URL of your Scion sync server')
-      .addText((text) =>
-        text
-          .setPlaceholder('http://localhost:3000')
-          .setValue(this.plugin.settings.serverUrl)
+      .setName('Backend')
+      .setDesc(
+        'Server = the Pi-hosted scion server (unchanged). R2 = sync straight to a Cloudflare R2 ' +
+          'bucket, no server needed. Move ALL of a vault\'s devices to the same backend together — ' +
+          'the two do not talk to each other.'
+      )
+      .addDropdown((dropdown) =>
+        dropdown
+          .addOption('server', 'Scion server (Pi)')
+          .addOption('r2', 'Cloudflare R2 (serverless)')
+          .setValue(this.plugin.settings.backend)
           .onChange(async (value) => {
-            this.plugin.settings.serverUrl = value;
+            this.plugin.settings.backend = value as 'server' | 'r2';
             await this.plugin.saveSettings();
+            this.plugin.getSyncService()?.updateSettings(this.plugin.settings);
+            this.display();
           })
       );
+
+    if (this.plugin.settings.backend === 'server') {
+      new Setting(containerEl)
+        .setName('Server URL')
+        .setDesc('The URL of your Scion sync server')
+        .addText((text) =>
+          text
+            .setPlaceholder('http://localhost:3000')
+            .setValue(this.plugin.settings.serverUrl)
+            .onChange(async (value) => {
+              this.plugin.settings.serverUrl = value;
+              await this.plugin.saveSettings();
+              this.plugin.getSyncService()?.updateSettings(this.plugin.settings);
+            })
+        );
+    } else {
+      containerEl.createEl('h3', { text: 'R2 bucket' });
+
+      new Setting(containerEl).setName('Account ID').addText((text) =>
+        text
+          .setPlaceholder('Cloudflare account ID')
+          .setValue(this.plugin.settings.r2AccountId)
+          .onChange(async (value) => {
+            this.plugin.settings.r2AccountId = value;
+            await this.plugin.saveSettings();
+            this.plugin.getSyncService()?.updateSettings(this.plugin.settings);
+          })
+      );
+
+      new Setting(containerEl).setName('Bucket').addText((text) =>
+        text
+          .setPlaceholder('scion-vault')
+          .setValue(this.plugin.settings.r2Bucket)
+          .onChange(async (value) => {
+            this.plugin.settings.r2Bucket = value;
+            await this.plugin.saveSettings();
+            this.plugin.getSyncService()?.updateSettings(this.plugin.settings);
+          })
+      );
+
+      new Setting(containerEl)
+        .setName('Access key ID')
+        .setDesc('From an R2 API token scoped to this one bucket, Object Read & Write')
+        .addText((text) =>
+          text
+            .setValue(this.plugin.settings.r2AccessKeyId)
+            .onChange(async (value) => {
+              this.plugin.settings.r2AccessKeyId = value;
+              await this.plugin.saveSettings();
+              this.plugin.getSyncService()?.updateSettings(this.plugin.settings);
+            })
+        );
+
+      new Setting(containerEl)
+        .setName('Secret access key')
+        .setDesc('Stored in plain text in this vault\'s plugin data, same as the server URL is today')
+        .addText((text) => {
+          text.inputEl.type = 'password';
+          text
+            .setValue(this.plugin.settings.r2SecretAccessKey)
+            .onChange(async (value) => {
+              this.plugin.settings.r2SecretAccessKey = value;
+              await this.plugin.saveSettings();
+              this.plugin.getSyncService()?.updateSettings(this.plugin.settings);
+            });
+        });
+    }
 
     new Setting(containerEl)
       .setName('Device name')
@@ -271,6 +370,20 @@ class ScionSyncSettingTab extends PluginSettingTab {
           })
       );
 
+    new Setting(containerEl)
+      .setName('Reset local sync state')
+      .setDesc(
+        'Clears this device\'s sync bookkeeping and does a fresh full pull on next sync. ' +
+          'Use this after switching this device to a different backend (see the error the status bar ' +
+          'shows if you forget). Does not delete anything remote.'
+      )
+      .addButton((btn) =>
+        btn.setButtonText('Reset').onClick(async () => {
+          await this.plugin.resetLocalSyncState();
+          this.display();
+        })
+      );
+
     // Status
     const stats = this.plugin.getSyncService()?.getStats();
     if (stats) {
@@ -298,7 +411,10 @@ class SyncStatusModal extends Modal {
 
     const stats = this.plugin.getSyncService()?.getStats();
     const infoEl = contentEl.createDiv({ cls: 'scion-status-info' });
-    infoEl.createEl('p', { text: `Server: ${this.plugin.settings.serverUrl}` });
+    infoEl.createEl('p', { text: `Backend: ${this.plugin.settings.backend === 'r2' ? 'Cloudflare R2' : 'Scion server (Pi)'}` });
+    if (this.plugin.settings.backend === 'server') {
+      infoEl.createEl('p', { text: `Server: ${this.plugin.settings.serverUrl}` });
+    }
     infoEl.createEl('p', { text: `Vault: ${this.app.vault.getName()}` });
     infoEl.createEl('p', { text: `Auto-sync: ${this.plugin.settings.autoSync ? 'Enabled' : 'Disabled'}` });
     infoEl.createEl('p', { text: `Poll interval: ${this.plugin.settings.pollInterval}s` });

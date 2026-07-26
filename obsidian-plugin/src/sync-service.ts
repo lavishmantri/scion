@@ -1,4 +1,7 @@
 import { App, Notice, TFile, TFolder, Vault, EventRef } from 'obsidian';
+import { SyncBackend, StatusResponse, ManifestResponse, PushOperation, PushResponse } from './backends/backend';
+import { HttpBackend } from './backends/http-backend';
+import { R2Backend } from './backends/r2-backend';
 
 // --- Types ---
 
@@ -12,57 +15,13 @@ interface SyncState {
   [path: string]: SyncStateEntry;
 }
 
-interface FileChange {
-  path: string;
-  status: 'added' | 'modified' | 'deleted' | 'renamed';
-  old_path?: string;
-}
-
-interface StatusResponse {
-  head_commit: string;
-  changes: FileChange[];
-  has_changes: boolean;
-}
-
-interface FileRecord {
-  path: string;
-  hash: string;
-  commit: string;
-  updated_at: number;
-  file_id?: string;
-}
-
-interface ManifestResponse {
-  files: FileRecord[];
-  head_commit: string;
-}
-
-type PushOperationType = 'create' | 'modify' | 'rename' | 'delete';
-
-interface PushOperation {
-  type: PushOperationType;
-  path: string;
-  content?: string; // base64
-  file_id?: string;
-  old_path?: string;
-}
-
-interface PushResult {
-  index: number;
-  success: boolean;
-  file_id?: string;
-  hash?: string;
-  error?: string;
-}
-
-interface PushResponse {
-  success: boolean;
-  head_commit: string;
-  results: PushResult[];
-}
-
 export interface ScionSyncSettings {
+  backend: 'server' | 'r2'; // ponytail: per-vault, not per-device — see Risks in plan. Existing installs default to 'server'.
   serverUrl: string;
+  r2AccountId: string;
+  r2Bucket: string;
+  r2AccessKeyId: string;
+  r2SecretAccessKey: string;
   deviceName: string;
   pollInterval: number; // seconds (30-600, default 300)
   autoSync: boolean;
@@ -72,7 +31,6 @@ export interface ScionSyncSettings {
 
 export type SyncStatus = 'idle' | 'syncing' | 'success' | 'error';
 
-const FETCH_TIMEOUT_MS = 30_000;
 const MAX_RETRY = 3;
 
 // --- Helpers ---
@@ -105,15 +63,37 @@ function shouldSyncFile(path: string): boolean {
   return true;
 }
 
+export function createBackend(settings: ScionSyncSettings, vaultName: string): SyncBackend {
+  if (settings.backend === 'r2') {
+    return new R2Backend(
+      {
+        accountId: settings.r2AccountId,
+        bucket: settings.r2Bucket,
+        accessKeyId: settings.r2AccessKeyId,
+        secretAccessKey: settings.r2SecretAccessKey,
+      },
+      vaultName
+    );
+  }
+  return new HttpBackend(settings.serverUrl, settings.deviceName, vaultName);
+}
+
 // --- SyncService ---
+//
+// This class is transport-agnostic. All network I/O goes through `this.backend`
+// (a SyncBackend — see backends/backend.ts). Nothing below this line should
+// import from `obsidian`'s fetch/requestUrl or know about HTTP status codes,
+// R2, or any other transport detail — that's HttpBackend's / R2Backend's job.
 
 export class SyncService {
   private app: App;
   private vault: Vault;
   private settings: ScionSyncSettings;
   private vaultName: string;
+  private backend: SyncBackend;
   private syncState: SyncState;
   private lastSyncedCommit: string | null = null;
+  private lastBackend: 'server' | 'r2' | null;
   private syncLock: 'unlocked' | 'pulling' | 'pushing' = 'unlocked';
   private ignoringFileEvents = false;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
@@ -128,15 +108,18 @@ export class SyncService {
     vaultName: string,
     syncState: SyncState,
     lastSyncedCommit: string | null,
-    saveDataFn: (data: unknown) => Promise<void>
+    saveDataFn: (data: unknown) => Promise<void>,
+    lastBackend: 'server' | 'r2' | null = null
   ) {
     this.app = app;
     this.vault = app.vault;
     this.settings = settings;
     this.vaultName = vaultName;
+    this.backend = createBackend(settings, vaultName);
     this.syncState = syncState || {};
     this.lastSyncedCommit = lastSyncedCommit;
     this.saveDataFn = saveDataFn;
+    this.lastBackend = lastBackend;
   }
 
   setStatusCallback(cb: (status: SyncStatus, message?: string) => void) {
@@ -172,17 +155,40 @@ export class SyncService {
   }
 
   updateSettings(settings: ScionSyncSettings) {
+    const backendChanged =
+      settings.backend !== this.settings.backend ||
+      settings.serverUrl !== this.settings.serverUrl ||
+      settings.r2AccountId !== this.settings.r2AccountId ||
+      settings.r2Bucket !== this.settings.r2Bucket;
+
     this.settings = settings;
+    if (backendChanged) {
+      this.backend = createBackend(settings, this.vaultName);
+    }
+
     this.stopPolling();
     if (settings.autoSync) {
       this.startPolling();
     }
   }
 
+  /** Wipes all local sync bookkeeping so the next syncAll() bootstraps
+   * fresh — used when switching backends (see the split-brain guard above)
+   * or to recover from a corrupted local state. Touches nothing remote. */
+  async resetSyncState() {
+    this.syncState = {};
+    this.lastSyncedCommit = null;
+    // saveSyncState() below stamps lastBackend = current settings.backend,
+    // which is exactly right: this device now has a clean, empty history
+    // against whichever backend is currently selected.
+    await this.saveSyncState();
+  }
+
   getStats() {
     return {
       trackedFiles: Object.keys(this.syncState).length,
       lastCommit: this.lastSyncedCommit,
+      backend: this.settings.backend,
     };
   }
 
@@ -209,7 +215,7 @@ export class SyncService {
       this.debouncedSync();
     };
 
-    const onRename = (file: TFile | TFolder, oldPath: string) => {
+    const onRename = (_file: TFile | TFolder, _oldPath: string) => {
       if (this.ignoringFileEvents) return;
       // Don't move syncState entry — let collectLocalChanges detect it
       // as delete(oldPath) + create(newPath) so the rename gets pushed
@@ -229,9 +235,32 @@ export class SyncService {
   }
 
   // --- Core Sync ---
+  // Unchanged from the pre-backend version: this orchestration only ever
+  // talks to `this.backend`, so it does not know or care whether that's the
+  // Pi server or R2. Both backends return the same StatusResponse /
+  // ManifestResponse / PushResponse shapes.
 
   async syncAll(retryCount = 0): Promise<void> {
     if (this.syncLock !== 'unlocked') return;
+
+    // ponytail: cheap split-brain guard, not a real merge of the two
+    // backends' state (see plan Risks). The Pi server and R2 evolve
+    // independently; if this device's local state was last written while
+    // synced to the *other* backend, silently continuing would let the two
+    // diverge without ever raising a conflict. Refuse and say so instead.
+    if (
+      this.lastBackend !== null &&
+      this.lastBackend !== this.settings.backend &&
+      Object.keys(this.syncState).length > 0
+    ) {
+      this.emitStatus(
+        'error',
+        `This device last synced via "${this.lastBackend}"; settings now say "${this.settings.backend}". ` +
+          `Move ALL devices for this vault to the new backend together, or switch back. ` +
+          `To force a fresh start on this backend, clear this device's sync state in plugin settings.`
+      );
+      return;
+    }
 
     this.emitStatus('syncing');
 
@@ -275,7 +304,7 @@ export class SyncService {
         return;
       }
 
-      const pushResult = await this.push(operations);
+      const pushResult = await this.backend.push(this.lastSyncedCommit, operations);
 
       if (pushResult === 'stale') {
         this.syncLock = 'unlocked';
@@ -283,7 +312,7 @@ export class SyncService {
           console.log(`SyncService: Stale push, retrying (${retryCount + 1}/${MAX_RETRY})`);
           return this.syncAll(retryCount + 1);
         }
-        this.emitStatus('error', 'Push failed: server changed. Try again.');
+        this.emitStatus('error', 'Push failed: remote changed. Try again.');
         return;
       }
 
@@ -304,11 +333,7 @@ export class SyncService {
   // --- Pull: Full Manifest ---
 
   private async pullFullManifest() {
-    const resp = await this.fetchWithTimeout(
-      `${this.settings.serverUrl}/vault/${encodeURIComponent(this.vaultName)}/manifest`
-    );
-    if (!resp.ok) throw new Error(`Manifest fetch failed: ${resp.status}`);
-    const data: ManifestResponse = await resp.json();
+    const data: ManifestResponse = await this.backend.fetchManifest();
 
     for (const file of data.files) {
       await this.handlePulledFile(file.path);
@@ -337,18 +362,13 @@ export class SyncService {
       }
     }
 
-    // Download server version
-    const resp = await this.fetchWithTimeout(
-      `${this.settings.serverUrl}/vault/${encodeURIComponent(this.vaultName)}/file/${encodeURIComponent(filePath)}`
-    );
-    if (!resp.ok) {
-      console.warn(`SyncService: Failed to download ${filePath}: ${resp.status}`);
+    // Download remote version
+    const remoteFile = await this.backend.fetchFile(filePath);
+    if (!remoteFile) {
+      console.warn(`SyncService: Failed to download ${filePath}`);
       return;
     }
-
-    const serverContent = await resp.arrayBuffer();
-    const serverHash = resp.headers.get('X-File-Hash') || computeHash(serverContent);
-    const serverCommit = resp.headers.get('X-File-Commit') || '';
+    const { content: serverContent, commit: serverCommit } = remoteFile;
 
     if (localModified && localFile instanceof TFile) {
       // CONFLICT: both sides changed
@@ -385,7 +405,7 @@ export class SyncService {
     const localHash = await computeHash(serverContent);
     this.syncState[filePath] = {
       hash: localHash,
-      commit: serverCommit,
+      commit: serverCommit || '',
     };
   }
 
@@ -404,7 +424,7 @@ export class SyncService {
         await this.vault.delete(localFile);
       } else {
         // Local modified: keep local file, notify user
-        new Notice(`Server deleted ${filePath} but local has changes. Keeping local.`);
+        new Notice(`Remote deleted ${filePath} but local has changes. Keeping local.`);
       }
     }
 
@@ -480,31 +500,6 @@ export class SyncService {
     return ops;
   }
 
-  private async push(operations: PushOperation[]): Promise<PushResponse | 'stale'> {
-    const resp = await this.fetchWithTimeout(
-      `${this.settings.serverUrl}/vault/${encodeURIComponent(this.vaultName)}/push`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          base_commit: this.lastSyncedCommit,
-          operations,
-        }),
-      }
-    );
-
-    if (resp.status === 409) {
-      return 'stale';
-    }
-
-    if (!resp.ok) {
-      const body = await resp.text();
-      throw new Error(`Push failed (${resp.status}): ${body}`);
-    }
-
-    return await resp.json();
-  }
-
   private updateSyncStateFromPush(operations: PushOperation[], result: PushResponse) {
     for (let i = 0; i < operations.length; i++) {
       const op = operations[i];
@@ -526,34 +521,21 @@ export class SyncService {
   // --- Network ---
 
   private async fetchStatus(): Promise<StatusResponse> {
-    const since = this.lastSyncedCommit ? `?since=${this.lastSyncedCommit}` : '';
-    const resp = await this.fetchWithTimeout(
-      `${this.settings.serverUrl}/vault/${encodeURIComponent(this.vaultName)}/status${since}`
-    );
-    if (!resp.ok) throw new Error(`Status fetch failed: ${resp.status}`);
-    return await resp.json();
-  }
-
-  private async fetchWithTimeout(url: string, options?: RequestInit): Promise<Response> {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-    const headers = new Headers(options?.headers);
-    if (this.settings.deviceName) {
-      headers.set('X-Scion-Device', this.settings.deviceName);
+    const localHashes: Record<string, string> = {};
+    for (const [path, entry] of Object.entries(this.syncState)) {
+      localHashes[path] = entry.hash;
     }
-    try {
-      return await fetch(url, { ...options, headers, signal: controller.signal });
-    } finally {
-      clearTimeout(timeout);
-    }
+    return this.backend.fetchStatus(this.lastSyncedCommit, localHashes);
   }
 
   // --- Persistence ---
 
   private async saveSyncState() {
+    this.lastBackend = this.settings.backend;
     await this.saveDataFn({
       syncState: this.syncState,
       lastSyncedCommit: this.lastSyncedCommit,
+      lastBackend: this.lastBackend,
     });
   }
 

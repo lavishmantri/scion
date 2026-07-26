@@ -20,5 +20,7 @@
     "obsidian": "^1.11.0",
     "typescript": "^5.9.3"
   },
-  "dependencies": {}
+  "dependencies": {
+    "aws4fetch": "^1.0.20"
+  }
 }
